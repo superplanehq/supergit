@@ -11,8 +11,10 @@ global_job_config:
     commands:
       - checkout
       - sem-version go 1.26.2
-      - export GOPATH=tmp/go
-      - export GOCACHE=tmp/go-build
+      - mkdir -p tmp/go/pkg/mod tmp/go-build
+      - export GOPATH="$SEMAPHORE_PROJECT_DIR/tmp/go"
+      - export GOMODCACHE="$SEMAPHORE_PROJECT_DIR/tmp/go/pkg/mod"
+      - export GOCACHE="$SEMAPHORE_PROJECT_DIR/tmp/go-build"
       - export PATH="$GOPATH/bin:$PATH"
       - "cache restore go-mod-$(checksum go.sum),go-mod"
       - "cache restore go-build-$(checksum go.sum),go-build"
@@ -43,7 +45,7 @@ blocks:
         always:
           commands:
             - "[ -f junit-report.xml ] && test-results publish junit-report.xml"
-            - "cache store go-mod-$(checksum go.sum) tmp/go"
+            - "cache store go-mod-$(checksum go.sum) tmp/go/pkg/mod"
             - "cache store go-build-$(checksum go.sum) tmp/go-build"
 
 after_pipeline:
