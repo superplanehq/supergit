@@ -215,7 +215,7 @@ POST /api/repos/{id}/commits
 Content-Type: application/x-ndjson
 ```
 
-Creates a commit by streaming file operations in [NDJSON](https://github.com/ndjson/ndjson-spec) format, similar to code.storage commit packs.
+Creates a commit by streaming file operations in [NDJSON](https://github.com/ndjson/ndjson-spec) format.
 
 The body is a newline-delimited stream:
 

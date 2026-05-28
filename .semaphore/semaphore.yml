@@ -1,0 +1,60 @@
+version: v1.0
+name: CI
+
+agent:
+  machine:
+    type: f1-standard-2
+    os_image: ubuntu2204
+
+global_job_config:
+  prologue:
+    commands:
+      - checkout
+      - sem-version go 1.26.2
+      - export GOPATH=tmp/go
+      - export GOCACHE=tmp/go-build
+      - export PATH="$GOPATH/bin:$PATH"
+      - "cache restore go-mod-$(checksum go.sum),go-mod"
+      - "cache restore go-build-$(checksum go.sum),go-build"
+      - make setup
+
+auto_cancel:
+  running:
+    when: branch != 'main'
+  queued:
+    when: branch != 'main'
+
+blocks:
+  - name: "Tests"
+    dependencies: []
+    run:
+      when: "tag =~ '^v.*' or change_in(['/cmd/', '/internal/', '/scripts/', '/go.mod', '/go.sum', '/Makefile', '/lint.toml'], {exclude: ['**/*.md', '/docs/**'], default_branch: 'main'})"
+    task:
+      jobs:
+        - name: Lint
+          commands:
+            - make lint
+
+        - name: Unit Tests
+          commands:
+            - make test
+
+      epilogue:
+        always:
+          commands:
+            - "[ -f junit-report.xml ] && test-results publish junit-report.xml"
+            - "cache store go-mod-$(checksum go.sum) tmp/go"
+            - "cache store go-build-$(checksum go.sum) tmp/go-build"
+
+after_pipeline:
+  task:
+    jobs:
+      - name: Submit Reports
+        commands:
+          - test-results gen-pipeline-report
+
+promotions:
+  - name: Publish Image
+    pipeline_file: release-image.yml
+    auto_promote:
+      when: "result = 'passed' and tag =~ '^v[0-9]+\\.[0-9]+\\.[0-9]+$'"

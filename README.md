@@ -2,7 +2,7 @@
 
 Git-backed file storage for SuperPlane, exposed over HTTP. supergit manages bare Git repositories on disk and lets callers create repos, list and read files, and write commits without running Git in the client.
 
-The API is intentionally similar to [code.storage](https://code.storage/docs/reference/api/overview) so SuperPlane can swap storage backends with a small HTTP client.
+The HTTP API is designed for SuperPlane clients, with a stable interface for swapping storage backends.
 
 supergit lives in the SuperPlane repo for now and is planned to move into its own repository once it stabilizes.
 
