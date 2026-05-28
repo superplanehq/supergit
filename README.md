@@ -2,44 +2,14 @@
 
 Git-backed file storage for SuperPlane, exposed over HTTP. supergit manages bare Git repositories on disk and lets callers create repos, list and read files, and write commits without running Git in the client.
 
-The HTTP API is designed for SuperPlane clients, with a stable interface for swapping storage backends.
-
-supergit lives in the SuperPlane repo for now and is planned to move into its own repository once it stabilizes.
-
 ## Requirements
 
 - Go 1.26+
 - `git` on `PATH` (used for all repository operations)
 
-## Run locally
+## API reference
 
-```bash
-cd supergit
-go run ./cmd/supergit
-```
-
-By default the server listens on `:8080` and stores repositories under `/var/lib/supergit/repos`.
-
-Health check:
-
-```bash
-curl http://localhost:8080/health
-```
-
-## Docker
-
-From the SuperPlane repo root:
-
-```bash
-docker compose -f docker-compose.dev.yml up -d supergit
-```
-
-Or build the image directly:
-
-```bash
-docker build -t supergit ./supergit
-docker run --rm -p 8080:8080 -v supergit-data:/var/lib/supergit/repos supergit
-```
+See [docs/api.md](docs/api.md) for endpoint details, request/response shapes, and the NDJSON commit format.
 
 ## Configuration
 
@@ -50,39 +20,12 @@ docker run --rm -p 8080:8080 -v supergit-data:/var/lib/supergit/repos supergit
 | `SUPERGIT_DEFAULT_BRANCH` | `main` | Default branch when a repo is created without one |
 | `SUPERGIT_MAX_FILE_BYTES` | `10485760` (10 MiB) | Maximum size of a single file in a commit |
 | `SUPERGIT_MAX_COMMIT_BYTES` | `26214400` (25 MiB) | Maximum total blob size per commit |
-
-## SuperPlane integration
-
-In local development, SuperPlane talks to supergit via the `supergit` canvas storage driver:
-
-```env
-CANVAS_STORAGE_DRIVER=supergit
-CANVAS_STORAGE_SUPERGIT_BASE_URL=http://supergit:8080/api
-```
-
-See the main repo `docker-compose.dev.yml` for the full dev setup.
+| `SUPERGIT_RESERVED_PATHS` | _(empty)_ | Comma-separated top-level paths callers cannot write (for example `.superplane`) |
 
 ## Repository IDs
 
-Repository IDs must match:
+Repository IDs are opaque strings chosen by the caller. They may contain slashes (for example `acme/widgets`) and are mapped to bare Git repositories under `SUPERGIT_ROOT`. IDs must be relative paths: non-empty, without `..`, `.git` segments, or null bytes.
 
-```text
-orgs/{organization_uuid}/canvases/{canvas_uuid}
-```
+When an ID contains slashes, URL-encode it in request paths (see [docs/api.md](docs/api.md)).
 
-Both UUIDs must be valid. Paths under `.superplane/` are reserved and cannot be written by callers.
-
-## API reference
-
-See [docs/api.md](docs/api.md) for endpoint details, request/response shapes, and the NDJSON commit format.
-
-## Project layout
-
-```text
-supergit/
-  cmd/supergit/     HTTP server entrypoint
-  internal/api/     Route handlers
-  internal/storage/ Git storage implementation
-  internal/config/  Environment configuration
-  docs/             API documentation
-```
+Paths listed in `SUPERGIT_RESERVED_PATHS` and anything under them cannot be written by callers.

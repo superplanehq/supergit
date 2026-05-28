@@ -34,14 +34,16 @@ Clients should rely on HTTP status codes, not exact error strings.
 
 ## Repository IDs in URLs
 
-Repository IDs contain slashes (`orgs/{org}/canvases/{canvas}`). Encode each path segment for URL paths:
+Repository IDs are caller-defined and may contain slashes (for example `acme/widgets`). Encode slashes in URL paths:
 
 ```text
-orgs/550e8400-e29b-41d4-a716-446655440000/canvases/6ba7b810-9dad-11d1-80b4-00c04fd430c8
-→ orgs%2F550e8400-e29b-41d4-a716-446655440000%2Fcanvases%2F6ba7b810-9dad-11d1-80b4-00c04fd430c8
+acme/widgets
+→ acme%2Fwidgets
 ```
 
 The server URL-decodes the `{id}` path parameter before resolving the repository.
+
+Repository IDs must be relative, non-empty paths without `..`, `.git` segments, or null bytes.
 
 ---
 
@@ -59,7 +61,7 @@ GET /api/repos
 {
   "repos": [
     {
-      "id": "orgs/{org}/canvases/{canvas}",
+      "id": "acme/widgets",
       "default_branch": "main"
     }
   ],
@@ -81,14 +83,14 @@ Content-Type: application/json
 
 ```json
 {
-  "id": "orgs/{org}/canvases/{canvas}",
+  "id": "acme/widgets",
   "default_branch": "main"
 }
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `id` | yes | Repository identifier (see format above) |
+| `id` | yes | Repository identifier |
 | `default_branch` | no | Branch created on `git init` (defaults to server `SUPERGIT_DEFAULT_BRANCH`) |
 
 If the repository already exists, the call succeeds and returns the existing repository metadata.
@@ -97,7 +99,7 @@ If the repository already exists, the call succeeds and returns the existing rep
 
 ```json
 {
-  "id": "orgs/{org}/canvases/{canvas}",
+  "id": "acme/widgets",
   "default_branch": "main"
 }
 ```
@@ -114,7 +116,7 @@ GET /api/repos/{id}
 
 ```json
 {
-  "id": "orgs/{org}/canvases/{canvas}",
+  "id": "acme/widgets",
   "default_branch": "main"
 }
 ```
@@ -280,7 +282,7 @@ Each blob may be sent in multiple chunks; decoded content is concatenated until 
 #### Example request
 
 ```bash
-curl -X POST "http://localhost:8080/api/repos/org%2F...%2Fcanvases%2F.../commits" \
+curl -X POST "http://localhost:8080/api/repos/acme%2Fwidgets/commits" \
   -H "Content-Type: application/x-ndjson" \
   --data-binary @- <<'EOF'
 {"metadata":{"target_branch":"main","commit_message":"Add README","author":{"name":"SuperPlane","email":"bot@superplane.local"},"files":[{"path":"README.md","operation":"upsert","content_id":"blob-1","mode":"100644"}]}}
@@ -337,7 +339,7 @@ Branch names (for example `main`) are resolved to the branch head commit.
 ## Path rules
 
 - File paths must be relative, non-empty, and must not contain `..`, `.git`, or null bytes.
-- The path `.superplane` and anything under `.superplane/` is reserved and rejected.
+- Paths configured in `SUPERGIT_RESERVED_PATHS` and anything under them are rejected.
 
 ## Size limits
 

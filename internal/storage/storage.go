@@ -12,18 +12,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-
-	"github.com/google/uuid"
-)
-
-const (
-	ReservedSuperPlanePath = ".superplane"
 )
 
 var (
 	ErrInvalidPath          = errors.New("invalid file path")
 	ErrInvalidRepositoryID  = errors.New("invalid repository path")
-	ErrReservedPath         = errors.New("path is reserved for SuperPlane")
+	ErrReservedPath         = errors.New("path is reserved")
 	ErrFileTooLarge         = errors.New("file exceeds configured size limit")
 	ErrCommitTooLarge       = errors.New("commit exceeds configured size limit")
 	ErrInvalidCommit        = errors.New("invalid commit")
@@ -102,13 +96,19 @@ type Store struct {
 	root          string
 	defaultBranch string
 	limits        Limits
+	reservedPaths []string
 	locks         sync.Map
 }
 
-func NewStore(root, initialBranch string, limits Limits) (*Store, error) {
+func NewStore(root, initialBranch string, limits Limits, reservedPaths []string) (*Store, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return nil, errors.New("storage root is required")
+	}
+
+	normalizedReservedPaths, err := normalizeReservedPaths(reservedPaths)
+	if err != nil {
+		return nil, err
 	}
 
 	if _, err := exec.LookPath("git"); err != nil {
@@ -123,6 +123,7 @@ func NewStore(root, initialBranch string, limits Limits) (*Store, error) {
 		root:          root,
 		defaultBranch: defaultBranch(initialBranch),
 		limits:        limits,
+		reservedPaths: normalizedReservedPaths,
 	}, nil
 }
 
@@ -307,7 +308,7 @@ func (s *Store) Commit(ctx context.Context, ref RepositoryRef, options CommitOpt
 		return nil, err
 	}
 
-	operations, err := validateCommitOperations(options.Operations, s.limits)
+	operations, err := validateCommitOperations(options.Operations, s.limits, s.ValidateUserPath)
 	if err != nil {
 		return nil, err
 	}
@@ -573,6 +574,10 @@ type validatedOperation struct {
 
 func ValidateRepositoryID(value string) (string, error) {
 	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", ErrInvalidRepositoryID
+	}
+
 	if strings.HasPrefix(strings.ReplaceAll(value, "\\", "/"), "/") {
 		return "", ErrInvalidRepositoryID
 	}
@@ -582,28 +587,43 @@ func ValidateRepositoryID(value string) (string, error) {
 		return "", ErrInvalidRepositoryID
 	}
 
-	segments := strings.Split(normalized, "/")
-	if len(segments) != 4 || segments[0] != "orgs" || segments[2] != "canvases" {
-		return "", ErrInvalidRepositoryID
-	}
-	if _, err := uuid.Parse(segments[1]); err != nil {
-		return "", ErrInvalidRepositoryID
-	}
-	if _, err := uuid.Parse(segments[3]); err != nil {
-		return "", ErrInvalidRepositoryID
-	}
-
 	return normalized, nil
 }
 
-func ValidateUserPath(value string) (string, error) {
+func (s *Store) ValidateUserPath(value string) (string, error) {
 	normalized, err := NormalizePath(value)
 	if err != nil {
 		return "", err
 	}
 
-	if normalized == ReservedSuperPlanePath || strings.HasPrefix(normalized, ReservedSuperPlanePath+"/") {
-		return "", ErrReservedPath
+	for _, reserved := range s.reservedPaths {
+		if normalized == reserved || strings.HasPrefix(normalized, reserved+"/") {
+			return "", ErrReservedPath
+		}
+	}
+
+	return normalized, nil
+}
+
+func normalizeReservedPaths(paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+
+	seen := make(map[string]struct{}, len(paths))
+	normalized := make([]string, 0, len(paths))
+
+	for _, candidate := range paths {
+		path, err := NormalizePath(candidate)
+		if err != nil {
+			return nil, fmt.Errorf("invalid reserved path %q: %w", candidate, err)
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+
+		seen[path] = struct{}{}
+		normalized = append(normalized, path)
 	}
 
 	return normalized, nil
@@ -635,7 +655,7 @@ func NormalizePath(value string) (string, error) {
 	return normalized, nil
 }
 
-func validateCommitOperations(operations []FileOperation, limits Limits) ([]validatedOperation, error) {
+func validateCommitOperations(operations []FileOperation, limits Limits, validatePath func(string) (string, error)) ([]validatedOperation, error) {
 	if len(operations) == 0 {
 		return nil, fmt.Errorf("%w: at least one file operation is required", ErrInvalidCommit)
 	}
@@ -644,7 +664,7 @@ func validateCommitOperations(operations []FileOperation, limits Limits) ([]vali
 	var totalBytes int64
 
 	for _, operation := range operations {
-		path, err := ValidateUserPath(operation.Path)
+		path, err := validatePath(operation.Path)
 		if err != nil {
 			return nil, err
 		}

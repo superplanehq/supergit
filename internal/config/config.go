@@ -20,6 +20,7 @@ type Config struct {
 	DefaultBranch  string
 	MaxFileBytes   int64
 	MaxCommitBytes int64
+	ReservedPaths  []string
 }
 
 func Load() Config {
@@ -29,6 +30,7 @@ func Load() Config {
 		DefaultBranch:  loadString("SUPERGIT_DEFAULT_BRANCH", DefaultBranch),
 		MaxFileBytes:   loadInt64("SUPERGIT_MAX_FILE_BYTES", DefaultMaxFileBytes),
 		MaxCommitBytes: loadInt64("SUPERGIT_MAX_COMMIT_BYTES", DefaultMaxCommitBytes),
+		ReservedPaths:  loadStringList("SUPERGIT_RESERVED_PATHS"),
 	}
 }
 
@@ -52,4 +54,22 @@ func loadInt64(key string, fallback int64) int64 {
 	}
 
 	return parsed
+}
+
+func loadStringList(key string) []string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return nil
+	}
+
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			values = append(values, part)
+		}
+	}
+
+	return values
 }
