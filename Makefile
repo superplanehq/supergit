@@ -20,7 +20,7 @@ check.format.go:
 
 setup.tools:
 	$(GO) install gotest.tools/gotestsum@v1.13.0
-	$(GO) install github.com/mgechev/revive@v1.7.1
+	$(GO) install github.com/mgechev/revive@v1.15.0
 
 setup: setup.tools
 	$(GO) mod download
