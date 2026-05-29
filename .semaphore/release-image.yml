@@ -1,5 +1,5 @@
 version: v1.0
-name: "Build and Push supergit Image"
+name: "Release supergit"
 
 agent:
   machine:
@@ -15,6 +15,7 @@ global_job_config:
 
   secrets:
     - name: ghcr-push-token
+    - name: github-release-token
 
   prologue:
     commands:
@@ -70,3 +71,15 @@ blocks:
         - name: "Verify GHCR Image"
           commands:
             - docker manifest inspect "$SUPERGIT_IMAGE_REPO:${SEMAPHORE_GIT_TAG_NAME#v}"
+
+  - name: "GitHub Release"
+    dependencies: ["Verify Image"]
+    task:
+      jobs:
+        - name: "GoReleaser"
+          commands:
+            - sem-version go 1.26.2
+            - curl -sfL "https://github.com/goreleaser/goreleaser/releases/download/v2.16.0/goreleaser_Linux_x86_64.tar.gz" | tar -xz goreleaser
+            - chmod +x goreleaser
+            - export GITHUB_TOKEN="$GITHUB_RELEASE_TOKEN"
+            - ./goreleaser release --clean

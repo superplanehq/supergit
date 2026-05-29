@@ -1,4 +1,6 @@
-.PHONY: setup setup.tools lint test check.format.go image.build
+.PHONY: setup setup.tools lint test check.format.go image.build release.snapshot
+
+GORELEASER ?= goreleaser
 
 MAKEFLAGS += --no-print-directory
 
@@ -27,3 +29,6 @@ setup: setup.tools
 
 image.build:
 	bash scripts/build-image.sh "$(VERSION)" "$(ARCH)"
+
+release.snapshot:
+	$(GORELEASER) release --snapshot --clean --skip=publish

@@ -30,7 +30,7 @@ blocks:
   - name: "Tests"
     dependencies: []
     run:
-      when: "tag =~ '^v.*' or change_in(['/cmd/', '/internal/', '/scripts/', '/go.mod', '/go.sum', '/Makefile', '/lint.toml'], {exclude: ['**/*.md', '/docs/**'], default_branch: 'main'})"
+      when: "tag =~ '^v.*' or change_in(['/cmd/', '/internal/', '/scripts/', '/go.mod', '/go.sum', '/Makefile', '/lint.toml', '/.goreleaser.yaml'], {exclude: ['**/*.md', '/docs/**'], default_branch: 'main'})"
     task:
       jobs:
         - name: Lint
