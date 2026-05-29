@@ -79,7 +79,8 @@ blocks:
         - name: "GoReleaser"
           commands:
             - sem-version go 1.26.2
-            - curl -sfL "https://github.com/goreleaser/goreleaser/releases/download/v2.16.0/goreleaser_Linux_x86_64.tar.gz" | tar -xz goreleaser
-            - chmod +x goreleaser
+            - mkdir -p "$HOME/bin"
+            - curl -sfL "https://github.com/goreleaser/goreleaser/releases/download/v2.16.0/goreleaser_Linux_x86_64.tar.gz" | tar -xz -C "$HOME/bin" goreleaser
+            - export PATH="$HOME/bin:$PATH"
             - export GITHUB_TOKEN="$GITHUB_RELEASE_TOKEN"
-            - ./goreleaser release --clean
+            - goreleaser release --clean
