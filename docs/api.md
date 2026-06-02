@@ -174,6 +174,26 @@ GET /api/repos/{id}/files?path={path}&ref={ref}
 
 ---
 
+## Bundle
+
+### Download repository bundle
+
+```http
+GET /api/repos/{id}/bundle
+GET /api/repos/{id}/bundle?ref={ref}
+```
+
+| Query | Description |
+|-------|-------------|
+| `ref` | Optional branch, tag, or commit SHA. When omitted, the bundle includes all refs (`--all`). When set, only that ref is included. |
+
+**Response `200`**
+
+- `Content-Type: application/octet-stream`
+- Body: git bundle bytes suitable for `git clone repository.bundle <directory>`
+
+---
+
 ## Commits
 
 ### List commits

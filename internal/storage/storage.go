@@ -403,6 +403,44 @@ func (s *Store) Commit(ctx context.Context, ref RepositoryRef, options CommitOpt
 	return &CommitResult{CommitSHA: newSHA, OldSHA: oldSHA}, nil
 }
 
+func (s *Store) CreateBundle(ctx context.Context, ref RepositoryRef, gitRef string) (io.ReadCloser, error) {
+	repoID, err := ValidateRepositoryID(ref.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	repoPath, err := s.repoPath(repoID)
+	if err != nil {
+		return nil, err
+	}
+
+	unlock := s.lock(repoID)
+	defer unlock()
+
+	args := []string{"--git-dir", repoPath, "bundle", "create", "-", "--all"}
+	if trimmed := strings.TrimSpace(gitRef); trimmed != "" {
+		args = []string{"--git-dir", repoPath, "bundle", "create", "-", trimmed}
+	}
+
+	cmd := exec.CommandContext(ctx, "git", args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	return &gitCommandReadCloser{
+		reader: stdout,
+		cmd:    cmd,
+		stderr: &stderr,
+	}, nil
+}
+
 func (s *Store) Head(ctx context.Context, ref RepositoryRef, branch string) (string, error) {
 	repoID, err := ValidateRepositoryID(ref.ID)
 	if err != nil {

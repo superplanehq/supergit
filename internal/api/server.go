@@ -31,6 +31,7 @@ func (s *Server) Router() http.Handler {
 	api.HandleFunc("/repos", s.listRepos).Methods(http.MethodGet)
 	api.HandleFunc("/repos", s.createRepo).Methods(http.MethodPost)
 	api.HandleFunc("/repos/{id:.+}/files", s.files).Methods(http.MethodGet)
+	api.HandleFunc("/repos/{id:.+}/bundle", s.getBundle).Methods(http.MethodGet)
 	api.HandleFunc("/repos/{id:.+}/commits", s.listCommits).Methods(http.MethodGet)
 	api.HandleFunc("/repos/{id:.+}/commits", s.createCommit).Methods(http.MethodPost)
 	api.HandleFunc("/repos/{id:.+}/commit", s.getCommit).Methods(http.MethodGet)
@@ -113,6 +114,37 @@ func (s *Server) deleteRepo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) getBundle(w http.ResponseWriter, r *http.Request) {
+	repoID, err := repoIDFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	ref := strings.TrimSpace(r.URL.Query().Get("ref"))
+
+	repo, err := s.store.GetRepository(r.Context(), repoID)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+
+	reader, err := s.store.CreateBundle(r.Context(), storage.RepositoryRef{
+		ID:            repo.ID,
+		DefaultBranch: repo.DefaultBranch,
+	}, ref)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+	defer reader.Close()
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", `attachment; filename="repository.bundle"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, reader)
 }
 
 func (s *Server) files(w http.ResponseWriter, r *http.Request) {
