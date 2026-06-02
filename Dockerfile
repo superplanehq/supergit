@@ -1,6 +1,6 @@
 FROM golang:1.26.2-alpine AS builder
 
-RUN apk add --no-cache git ca-certificates wget
+RUN apk add --no-cache git git-daemon ca-certificates wget
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -11,7 +11,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /supergit ./cmd/supergit
 
 FROM alpine:3.21
 
-RUN apk add --no-cache git ca-certificates wget
+RUN apk add --no-cache git git-daemon ca-certificates wget
 
 WORKDIR /app
 COPY --from=builder /supergit /app/supergit

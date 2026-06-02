@@ -37,6 +37,8 @@ func (s *Server) Router() http.Handler {
 	api.HandleFunc("/repos/{id:.+}", s.getRepo).Methods(http.MethodGet)
 	api.HandleFunc("/repos/{id:.+}", s.deleteRepo).Methods(http.MethodDelete)
 
+	router.PathPrefix("/git/").Handler(http.HandlerFunc(s.gitHTTP))
+
 	router.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -52,8 +54,13 @@ func (s *Server) listRepos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	enriched := make([]storage.Repository, 0, len(repos))
+	for _, repo := range repos {
+		enriched = append(enriched, s.withCloneURL(repo))
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"repos":       repos,
+		"repos":       enriched,
 		"next_cursor": "",
 		"has_more":    false,
 	})
@@ -80,7 +87,7 @@ func (s *Server) createRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, repo)
+	writeJSON(w, http.StatusCreated, s.withCloneURL(*repo))
 }
 
 func (s *Server) getRepo(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +103,7 @@ func (s *Server) getRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, repo)
+	writeJSON(w, http.StatusOK, s.withCloneURL(*repo))
 }
 
 func (s *Server) deleteRepo(w http.ResponseWriter, r *http.Request) {

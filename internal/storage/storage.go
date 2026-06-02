@@ -38,6 +38,7 @@ type RepositorySpec struct {
 type Repository struct {
 	ID            string `json:"id"`
 	DefaultBranch string `json:"default_branch"`
+	CloneURL      string `json:"clone_url,omitempty"`
 }
 
 type RepositoryRef struct {
@@ -154,6 +155,11 @@ func (s *Store) CreateRepository(ctx context.Context, spec RepositorySpec) (*Rep
 	}
 
 	if _, err := runGit(ctx, "", "init", "--bare", "--initial-branch", branch, repoPath); err != nil {
+		return nil, err
+	}
+
+	// git-http-backend rejects anonymous git push unless http.receivepack is set.
+	if _, err := runGit(ctx, "", "--git-dir", repoPath, "config", "http.receivepack", "true"); err != nil {
 		return nil, err
 	}
 

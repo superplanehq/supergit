@@ -45,6 +45,22 @@ The server URL-decodes the `{id}` path parameter before resolving the repository
 
 Repository IDs must be relative, non-empty paths without `..`, `.git` segments, or null bytes.
 
+## Git clone (Smart HTTP)
+
+Supergit exposes bare repositories for `git clone`, `git fetch`, and `git push` under:
+
+```text
+http://<host>:<port>/git/{repository-id}.git
+```
+
+Example:
+
+```bash
+git clone http://localhost:8080/git/acme/widgets.git
+```
+
+Configure `SUPERGIT_PUBLIC_URL` (for example `http://localhost:8080/git`) so repository metadata includes `clone_url`.
+
 ---
 
 ## Repositories
