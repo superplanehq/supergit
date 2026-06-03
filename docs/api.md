@@ -27,8 +27,8 @@ Clients should rely on HTTP status codes, not exact error strings.
 | Status | Meaning |
 |--------|---------|
 | `400` | Invalid request (bad path, invalid commit metadata, malformed body) |
-| `404` | Repository or Git object not found |
-| `409` | Expected head SHA does not match the current branch head |
+| `404` | Repository, branch, or Git object not found |
+| `409` | Conflict (expected head SHA mismatch, or branch already exists) |
 | `413` | File or commit exceeds configured size limits |
 | `500` | Internal server error |
 
@@ -78,7 +78,8 @@ GET /api/repos
   "repos": [
     {
       "id": "acme/widgets",
-      "default_branch": "main"
+      "default_branch": "main",
+      "clone_url": "http://localhost:8080/git/acme/widgets.git"
     }
   ],
   "next_cursor": "",
@@ -116,9 +117,12 @@ If the repository already exists, the call succeeds and returns the existing rep
 ```json
 {
   "id": "acme/widgets",
-  "default_branch": "main"
+  "default_branch": "main",
+  "clone_url": "http://localhost:8080/git/acme/widgets.git"
 }
 ```
+
+`clone_url` is omitted when `SUPERGIT_PUBLIC_URL` is not set.
 
 Creating a repository initializes an empty bare repo. Initial files (for example `README.md`) are added by the client via the commits endpoint.
 
@@ -133,7 +137,8 @@ GET /api/repos/{id}
 ```json
 {
   "id": "acme/widgets",
-  "default_branch": "main"
+  "default_branch": "main",
+  "clone_url": "http://localhost:8080/git/acme/widgets.git"
 }
 ```
 
@@ -349,6 +354,115 @@ GET /api/repos/{id}/commit?sha={sha}
 ```
 
 Branch names (for example `main`) are resolved to the branch head commit.
+
+---
+
+## Branches
+
+Branch names in URL paths (for delete) are URL-decoded like repository IDs. Encode slashes and other reserved characters as needed.
+
+### List branches
+
+```http
+GET /api/repos/{id}/branches
+GET /api/repos/{id}/branches?prefix={prefix}
+```
+
+| Query | Description |
+|-------|-------------|
+| `prefix` | Optional filter; only branch names with this prefix are returned |
+
+**Response `200`**
+
+```json
+{
+  "branches": ["main", "feature/login"]
+}
+```
+
+Returns an empty array when the repository has no branches yet.
+
+### Create branch
+
+```http
+POST /api/repos/{id}/branches
+Content-Type: application/json
+```
+
+**Request body**
+
+```json
+{
+  "branch": "feature/login",
+  "from_ref": "main"
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `branch` | yes | Name of the branch to create |
+| `from_ref` | no | Branch, tag, or commit SHA to branch from (defaults to the repository default branch) |
+
+**Response `204`**
+
+No body.
+
+Returns `409` if the branch already exists. Returns `404` if `from_ref` does not resolve to a commit.
+
+### Delete branch
+
+```http
+DELETE /api/repos/{id}/branches/{branch}
+```
+
+**Response `204`**
+
+No body.
+
+Returns `404` if the branch does not exist.
+
+### Merge branches
+
+```http
+POST /api/repos/{id}/merge
+Content-Type: application/json
+```
+
+Merges `source_branch` into `target_branch` and always creates a merge commit (`--no-ff`), even when a fast-forward is possible.
+
+**Request body**
+
+```json
+{
+  "source_branch": "feature/login",
+  "target_branch": "main",
+  "message": "Merge feature/login",
+  "author": {
+    "name": "Jane Doe",
+    "email": "jane@example.com"
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `source_branch` | yes | Branch to merge from |
+| `target_branch` | no | Branch to merge into (defaults to the repository default branch) |
+| `message` | yes | Merge commit message |
+| `author.name` | yes | Merge commit author name |
+| `author.email` | yes | Merge commit author email |
+
+**Response `200`**
+
+```json
+{
+  "commit_sha": "9e6a46e7f5affc39101a2bbe03b85ea0c934cdef"
+}
+```
+
+`commit_sha` is the new head of `target_branch` after the merge.
+
+Returns `404` if either branch does not exist. Merge conflicts and other Git errors return `500`.
 
 ---
 
