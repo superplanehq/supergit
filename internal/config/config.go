@@ -17,6 +17,7 @@ const (
 type Config struct {
 	Root           string
 	Port           string
+	PublicURL      string
 	DefaultBranch  string
 	MaxFileBytes   int64
 	MaxCommitBytes int64
@@ -27,6 +28,7 @@ func Load() Config {
 	return Config{
 		Root:           loadString("SUPERGIT_ROOT", DefaultRoot),
 		Port:           loadString("SUPERGIT_PORT", DefaultPort),
+		PublicURL:      strings.TrimRight(loadString("SUPERGIT_PUBLIC_URL", ""), "/"),
 		DefaultBranch:  loadString("SUPERGIT_DEFAULT_BRANCH", DefaultBranch),
 		MaxFileBytes:   loadInt64("SUPERGIT_MAX_FILE_BYTES", DefaultMaxFileBytes),
 		MaxCommitBytes: loadInt64("SUPERGIT_MAX_COMMIT_BYTES", DefaultMaxCommitBytes),

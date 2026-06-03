@@ -34,8 +34,14 @@ func (s *Server) Router() http.Handler {
 	api.HandleFunc("/repos/{id:.+}/commits", s.listCommits).Methods(http.MethodGet)
 	api.HandleFunc("/repos/{id:.+}/commits", s.createCommit).Methods(http.MethodPost)
 	api.HandleFunc("/repos/{id:.+}/commit", s.getCommit).Methods(http.MethodGet)
+	api.HandleFunc("/repos/{id:.+}/branches", s.listBranches).Methods(http.MethodGet)
+	api.HandleFunc("/repos/{id:.+}/branches", s.createBranch).Methods(http.MethodPost)
+	api.HandleFunc("/repos/{id:.+}/branches/{branch:.+}", s.deleteBranch).Methods(http.MethodDelete)
+	api.HandleFunc("/repos/{id:.+}/merge", s.mergeBranch).Methods(http.MethodPost)
 	api.HandleFunc("/repos/{id:.+}", s.getRepo).Methods(http.MethodGet)
 	api.HandleFunc("/repos/{id:.+}", s.deleteRepo).Methods(http.MethodDelete)
+
+	router.PathPrefix("/git/").Handler(http.HandlerFunc(s.gitHTTP))
 
 	router.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -52,8 +58,13 @@ func (s *Server) listRepos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	enriched := make([]storage.Repository, 0, len(repos))
+	for _, repo := range repos {
+		enriched = append(enriched, s.withCloneURL(repo))
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"repos":       repos,
+		"repos":       enriched,
 		"next_cursor": "",
 		"has_more":    false,
 	})
@@ -80,7 +91,7 @@ func (s *Server) createRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, repo)
+	writeJSON(w, http.StatusCreated, s.withCloneURL(*repo))
 }
 
 func (s *Server) getRepo(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +107,7 @@ func (s *Server) getRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, repo)
+	writeJSON(w, http.StatusOK, s.withCloneURL(*repo))
 }
 
 func (s *Server) deleteRepo(w http.ResponseWriter, r *http.Request) {
@@ -271,6 +282,144 @@ func (s *Server) getCommit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, commit)
 }
 
+type createBranchRequest struct {
+	Branch  string `json:"branch"`
+	FromRef string `json:"from_ref"`
+}
+
+func (s *Server) listBranches(w http.ResponseWriter, r *http.Request) {
+	repoID, err := repoIDFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	prefix := strings.TrimSpace(r.URL.Query().Get("prefix"))
+
+	repo, err := s.store.GetRepository(r.Context(), repoID)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+
+	branches, err := s.store.ListBranches(r.Context(), storage.RepositoryRef{
+		ID:            repo.ID,
+		DefaultBranch: repo.DefaultBranch,
+	}, prefix)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"branches": branches})
+}
+
+func (s *Server) createBranch(w http.ResponseWriter, r *http.Request) {
+	repoID, err := repoIDFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var req createBranchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	repo, err := s.store.GetRepository(r.Context(), repoID)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+
+	err = s.store.CreateBranch(r.Context(), storage.RepositoryRef{
+		ID:            repo.ID,
+		DefaultBranch: repo.DefaultBranch,
+	}, req.Branch, req.FromRef)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) deleteBranch(w http.ResponseWriter, r *http.Request) {
+	repoID, err := repoIDFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	branch, err := url.PathUnescape(strings.TrimSpace(mux.Vars(r)["branch"]))
+	if err != nil || branch == "" {
+		writeError(w, http.StatusBadRequest, "branch is required")
+		return
+	}
+
+	repo, err := s.store.GetRepository(r.Context(), repoID)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+
+	err = s.store.DeleteBranch(r.Context(), storage.RepositoryRef{
+		ID:            repo.ID,
+		DefaultBranch: repo.DefaultBranch,
+	}, branch)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type mergeBranchRequest struct {
+	SourceBranch string `json:"source_branch"`
+	TargetBranch string `json:"target_branch"`
+	Message      string `json:"message"`
+	Author       struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	} `json:"author"`
+}
+
+func (s *Server) mergeBranch(w http.ResponseWriter, r *http.Request) {
+	repoID, err := repoIDFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var req mergeBranchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	repo, err := s.store.GetRepository(r.Context(), repoID)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+
+	commitSHA, err := s.store.MergeBranch(r.Context(), storage.RepositoryRef{
+		ID:            repo.ID,
+		DefaultBranch: repo.DefaultBranch,
+	}, req.SourceBranch, req.TargetBranch, req.Message, storage.CommitAuthor{
+		Name:  req.Author.Name,
+		Email: req.Author.Email,
+	})
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"commit_sha": commitSHA})
+}
+
 func (s *Server) storeLimits() storage.Limits {
 	return storage.Limits{
 		MaxFileBytes:   s.config.MaxFileBytes,
@@ -302,6 +451,10 @@ func writeStorageError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, storage.ErrRepositoryNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, storage.ErrBranchNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, storage.ErrBranchAlreadyExists):
+		writeError(w, http.StatusConflict, err.Error())
 	default:
 		writeError(w, http.StatusInternalServerError, err.Error())
 	}
