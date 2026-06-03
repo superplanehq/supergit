@@ -23,6 +23,8 @@ var (
 	ErrInvalidCommit        = errors.New("invalid commit")
 	ErrExpectedHeadMismatch = errors.New("expected head sha does not match current branch head")
 	ErrRepositoryNotFound   = errors.New("repository not found")
+	ErrBranchNotFound       = errors.New("branch not found")
+	ErrBranchAlreadyExists  = errors.New("branch already exists")
 )
 
 type Limits struct {
@@ -526,6 +528,185 @@ func (s *Store) ListCommits(ctx context.Context, ref RepositoryRef, branch strin
 	}
 
 	return commits, nil
+}
+
+func (s *Store) ListBranches(ctx context.Context, ref RepositoryRef, prefix string) ([]string, error) {
+	repoID, err := ValidateRepositoryID(ref.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	repoPath, err := s.repoPath(repoID)
+	if err != nil {
+		return nil, err
+	}
+
+	out, err := runGit(ctx, "", "--git-dir", repoPath, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+	if err != nil {
+		if isUnknownRevision(err) {
+			return []string{}, nil
+		}
+		return nil, err
+	}
+
+	prefix = strings.TrimSpace(prefix)
+	branches := make([]string, 0)
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		branches = append(branches, line)
+	}
+
+	return branches, nil
+}
+
+func (s *Store) CreateBranch(ctx context.Context, ref RepositoryRef, branch, fromRef string) error {
+	repoID, err := ValidateRepositoryID(ref.ID)
+	if err != nil {
+		return err
+	}
+
+	repoPath, err := s.repoPath(repoID)
+	if err != nil {
+		return err
+	}
+
+	unlock := s.lock(repoID)
+	defer unlock()
+
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return fmt.Errorf("%w: branch name is required", ErrInvalidCommit)
+	}
+
+	fromRef = refOrDefault(fromRef, ref.DefaultBranch)
+	if existing, _ := s.Head(ctx, ref, branch); existing != "" {
+		return ErrBranchAlreadyExists
+	}
+
+	fromSHA, err := runGit(ctx, "", "--git-dir", repoPath, "rev-parse", "--verify", fromRef+"^{commit}")
+	if err != nil {
+		if isUnknownRevision(err) {
+			return ErrBranchNotFound
+		}
+		return err
+	}
+
+	if _, err := runGit(ctx, "", "--git-dir", repoPath, "branch", branch, strings.TrimSpace(string(fromSHA))); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Store) DeleteBranch(ctx context.Context, ref RepositoryRef, branch string) error {
+	repoID, err := ValidateRepositoryID(ref.ID)
+	if err != nil {
+		return err
+	}
+
+	repoPath, err := s.repoPath(repoID)
+	if err != nil {
+		return err
+	}
+
+	unlock := s.lock(repoID)
+	defer unlock()
+
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return fmt.Errorf("%w: branch name is required", ErrInvalidCommit)
+	}
+
+	if existing, _ := s.Head(ctx, ref, branch); existing == "" {
+		return ErrBranchNotFound
+	}
+
+	if _, err := runGit(ctx, "", "--git-dir", repoPath, "branch", "-D", branch); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Store) MergeBranch(ctx context.Context, ref RepositoryRef, sourceBranch, targetBranch, message string, author CommitAuthor) (string, error) {
+	if err := validateCommitMetadata(message, author); err != nil {
+		return "", err
+	}
+
+	repoID, err := ValidateRepositoryID(ref.ID)
+	if err != nil {
+		return "", err
+	}
+
+	repoPath, err := s.repoPath(repoID)
+	if err != nil {
+		return "", err
+	}
+
+	unlock := s.lock(repoID)
+	defer unlock()
+
+	sourceBranch = strings.TrimSpace(sourceBranch)
+	targetBranch = refOrDefault(targetBranch, ref.DefaultBranch)
+	if sourceBranch == "" || targetBranch == "" {
+		return "", fmt.Errorf("%w: source and target branches are required", ErrInvalidCommit)
+	}
+
+	worktree, err := os.MkdirTemp("", "supergit-merge-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(worktree)
+
+	if _, err := runGit(ctx, "", "clone", repoPath, worktree); err != nil {
+		return "", err
+	}
+
+	if _, err := runGit(ctx, worktree, "checkout", targetBranch); err != nil {
+		if _, err := runGit(ctx, worktree, "checkout", "-b", targetBranch, "origin/"+targetBranch); err != nil {
+			return "", ErrBranchNotFound
+		}
+	}
+
+	oldSHA, _ := s.Head(ctx, ref, targetBranch)
+
+	sourceRef := sourceBranch
+	if _, err := runGit(ctx, worktree, "show-ref", "--verify", "--quiet", "refs/heads/"+sourceBranch); err != nil {
+		sourceRef = "origin/" + sourceBranch
+	}
+
+	if _, err := runGit(ctx, worktree, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+strings.TrimPrefix(sourceRef, "origin/")); err != nil {
+		return "", ErrBranchNotFound
+	}
+
+	if _, err := runGit(ctx, worktree,
+		"-c", "user.name="+strings.TrimSpace(author.Name),
+		"-c", "user.email="+strings.TrimSpace(author.Email),
+		"-c", "commit.gpgsign=false",
+		"merge", "--no-ff", "-m", strings.TrimSpace(message), sourceRef,
+	); err != nil {
+		return "", err
+	}
+
+	if _, err := runGit(ctx, worktree, "push", "origin", "HEAD:refs/heads/"+targetBranch); err != nil {
+		return "", err
+	}
+
+	newSHA, err := s.Head(ctx, ref, targetBranch)
+	if err != nil {
+		return "", err
+	}
+	if newSHA == "" {
+		return oldSHA, nil
+	}
+
+	return newSHA, nil
 }
 
 func (s *Store) defaultBranchForRepo(ctx context.Context, repoID string) (string, error) {
